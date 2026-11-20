@@ -117,6 +117,7 @@
 
   let db = load();
   const ui = { tab: 'journal', date: todayISO(), followToday: true, childQuery: '' };
+  let installPrompt = null; // proposé par Chrome sur Android
   let form = null;      // bobo en cours de saisie
   let childForm = null; // fiche enfant ouverte
 
@@ -203,7 +204,15 @@
   function installHintHTML() {
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
     const standalone = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
-    if (!ios || standalone || db.settings.installHintDismissed) return '';
+    if (standalone || db.settings.installHintDismissed) return '';
+    if (!ios) {
+      // Android (Chrome) : le navigateur nous confie l'installation.
+      if (!installPrompt) return '';
+      return `<div class="notice">
+        <p><b>Installez l’appli sur ce téléphone</b> pour l’ouvrir en plein écran et l’utiliser sans réseau. <button type="button" class="link" data-action="install">Installer</button></p>
+        <button type="button" data-action="hint-dismiss" aria-label="Masquer ce message">✕</button>
+      </div>`;
+    }
     return `<div class="notice">
       <p><b>Installez d’abord l’appli :</b> bouton Partager de Safari, puis « Sur l’écran d’accueil ». Ce que vous saisissez ici dans Safari ne sera pas repris dans l’appli installée.</p>
       <button type="button" data-action="hint-dismiss" aria-label="Masquer ce message">✕</button>
@@ -711,6 +720,14 @@
 
   const actions = {
     tab(el) { ui.tab = el.dataset.tab; render(); $('#view').scrollTop = 0; },
+    async install() {
+      if (!installPrompt) return;
+      const p = installPrompt;
+      installPrompt = null;
+      p.prompt();
+      try { await p.userChoice; } catch (e) { /* fermé */ }
+      render();
+    },
     'hint-dismiss'() { db.settings.installHintDismissed = true; save(); render(); },
 
     'day-prev'() { setDate(shiftDay(ui.date, -1)); render(); },
@@ -893,6 +910,13 @@
     setDate(todayISO());
     render();
   });
+
+  window.addEventListener('beforeinstallprompt', (ev) => {
+    ev.preventDefault();
+    installPrompt = ev;
+    if (ui.tab === 'journal' && !sheetStack.length) render();
+  });
+  window.addEventListener('appinstalled', () => { installPrompt = null; render(); });
 
   renderShell();
   render();

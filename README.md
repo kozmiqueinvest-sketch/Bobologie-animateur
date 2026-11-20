@@ -26,6 +26,14 @@ L'appli doit être servie en HTTPS pour pouvoir être installée. Le plus simple
 
 Avec un compte GitHub gratuit, Pages n'est disponible que pour un dépôt public. Le dépôt ne contient que le code de l'appli, aucune donnée.
 
+## QR code
+
+`qr-bobologie.png` mène à l'adresse de l'appli (`https://kozmiqueinvest-sketch.github.io/Pianapp/`). À scanner avec l'appareil photo du téléphone.
+
+## Installer sur Android
+
+Ouvrir l'adresse dans **Chrome**, puis toucher « Installer » dans le bandeau de l'appli, ou le menu ⋮ → « Ajouter à l'écran d'accueil ».
+
 ## Installer sur l'iPhone
 
 1. Ouvrir l'adresse de l'appli dans **Safari**.

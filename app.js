@@ -3,7 +3,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.6';
+  const VERSION = '1.7';
   const STORE_KEY = 'bobologie.v1';
 
   const DEFAULT_TYPES = ['Égratignure', 'Coupure', 'Bosse / coup', 'Chute', 'Saignement de nez', 'Piqûre d’insecte', 'Écharde', 'Brûlure', 'Doigt pincé', 'Mal de tête', 'Mal de ventre', 'Morsure'];
@@ -166,7 +166,8 @@
   };
   const unb64u = (str) => Uint8Array.from(atob(str.replace(/-/g, '+').replace(/_/g, '/')), (ch) => ch.charCodeAt(0));
   function directionKey() {
-    const k = (db.settings.directionKey || DIRECTION_PUB).trim();
+    // Le cadenas intégré à l'appli prime : un ancien cadenas collé à la main ne doit pas le masquer.
+    const k = (DIRECTION_PUB || db.settings.directionKey).trim();
     if (!/^[A-Za-z0-9_-]{86}$/.test(k)) return null;
     return k;
   }
@@ -211,7 +212,9 @@
     };
     try {
       const code = await encryptForDirection(JSON.stringify(payload), pub);
-      return { count: list.length, url: `${DIRECTION_URL}#e=${code}` };
+      // Les 6 premiers caractères du cadenas suivent le lien : la direction peut ainsi dire
+      // si un lien illisible vient d'un autre cadenas ou d'un lien abîmé.
+      return { count: list.length, url: `${DIRECTION_URL}#e=${code}.${pub.slice(0, 6)}` };
     } catch (e) {
       return null;
     }
@@ -466,8 +469,8 @@
       <section class="card panel">
         <h2>Lien direction</h2>
         <p class="hint">Quand un bobo est « à surveiller » ou « à transmettre », le message contient un lien verrouillé que seule la direction peut ouvrir. ${directionKey() ? '<b>Cadenas en place.</b>' : 'Sans cadenas, aucun lien n’est ajouté.'}</p>
-        <label class="field"><span class="label">Cadenas direction (fourni par la direction)</span>
-          <input type="text" value="${esc(s.directionKey)}" data-on-change="set-direction-key" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${DIRECTION_PUB ? 'Déjà intégré à l’appli' : 'Collez le cadenas ici'}"></label>
+${DIRECTION_PUB ? `<p class="hint">Cadenas intégré à l’appli : <b>${DIRECTION_PUB.slice(0, 6)}…</b></p>` : `        <label class="field"><span class="label">Cadenas direction (fourni par la direction)</span>
+          <input type="text" value="${esc(s.directionKey)}" data-on-change="set-direction-key" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Collez le cadenas ici"></label>`}
       </section>
       ${s.customTypes.length || s.customCares.length ? `
       <section class="card panel">

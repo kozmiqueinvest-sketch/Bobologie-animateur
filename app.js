@@ -3,7 +3,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.0';
+  const VERSION = '1.1';
   const STORE_KEY = 'bobologie.v1';
 
   const DEFAULT_TYPES = ['Égratignure', 'Coupure', 'Bosse / coup', 'Chute', 'Saignement de nez', 'Piqûre d’insecte', 'Écharde', 'Brûlure', 'Doigt pincé', 'Mal de tête', 'Mal de ventre', 'Morsure'];
@@ -13,6 +13,8 @@
     { key: 'parents', label: 'Parents prévenus', emoji: '📞' },
     { key: 'direction', label: 'Direction prévenue', emoji: '📣' },
     { key: 'watch', label: 'À surveiller', emoji: '👀' },
+    { key: 'txParents', label: 'Transmission parents', emoji: '💬' },
+    { key: 'txTeacher', label: 'Transmission enseignant', emoji: '🏫' },
   ];
   const NAME_FORMATS = [
     { id: 'first', label: 'Prénom' },

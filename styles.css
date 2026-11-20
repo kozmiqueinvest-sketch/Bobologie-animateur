@@ -163,7 +163,7 @@ svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width:
 .list-foot { margin-top: 16px; }
 
 .tabs {
-  display: grid; grid-template-columns: repeat(3, 1fr);
+  display: grid; grid-template-columns: repeat(4, 1fr);
   background: var(--surface); border-top: 1px solid var(--line);
   padding-bottom: env(safe-area-inset-bottom);
 }
@@ -296,3 +296,13 @@ textarea { resize: vertical; min-height: 84px; line-height: 1.4; display: block;
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- À suivre (direction) ---------- */
+.badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 11px; line-height: 18px; text-align: center; }
+.follow-list { display: grid; gap: 12px; }
+.follow { padding: 14px; display: grid; gap: 6px; border-left: 4px solid var(--accent); }
+.follow.is-done { border-left-color: var(--line); opacity: .75; }
+.follow-when { font-size: 14px; color: var(--muted); }
+.follow .alert { margin-top: 0; }
+.follow-actions { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.follow-actions .btn { flex: 1; min-height: 46px; font-size: 16px; }

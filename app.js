@@ -3,7 +3,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.0';
+  const VERSION = '1.1';
   const STORE_KEY = 'bobologie.v1';
 
   const DEFAULT_TYPES = ['Égratignure', 'Coupure', 'Bosse / coup', 'Chute', 'Saignement de nez', 'Piqûre d’insecte', 'Écharde', 'Brûlure', 'Doigt pincé', 'Mal de tête', 'Mal de ventre', 'Morsure'];
@@ -13,6 +13,14 @@
     { key: 'parents', label: 'Parents prévenus', emoji: '📞' },
     { key: 'direction', label: 'Direction prévenue', emoji: '📣' },
     { key: 'watch', label: 'À surveiller', emoji: '👀' },
+    { key: 'txTeacher', label: 'À transmettre à l’enseignant', emoji: '🏫' },
+    { key: 'txParents', label: 'À transmettre aux parents', emoji: '💬' },
+  ];
+  // Ce que la direction doit retrouver dans l'onglet « À suivre ».
+  const FOLLOW = [
+    { key: 'txTeacher', title: 'À transmettre aux enseignants', todo: 'Marquer comme transmis', done: 'Transmis' },
+    { key: 'txParents', title: 'À transmettre aux parents', todo: 'Marquer comme transmis', done: 'Transmis' },
+    { key: 'watch', title: 'À surveiller', todo: 'Fin de surveillance', done: 'Surveillance terminée' },
   ];
   const NAME_FORMATS = [
     { id: 'first', label: 'Prénom' },
@@ -28,11 +36,13 @@
     left: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.500 5.500 8 12l6.500 6.500"/></svg>',
     right: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.500 5.500 16 12l-6.500 6.500"/></svg>',
     bubble: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.500a8 8 0 0 1-11.800 7L4 20l1.500-4.100A8 8 0 1 1 20 11.500Z"/></svg>',
+    pin: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.500h12v17l-6-4-6 4z"/></svg>',
     bandage: '<svg viewBox="0 0 24 24" aria-hidden="true"><g transform="rotate(-45 12 12)"><rect x="2.500" y="8" width="19" height="8" rx="4"/><path d="M9 8v8M15 8v8"/><circle cx="12" cy="12" r=".700" fill="currentColor"/></g></svg>',
   };
 
   const TABS = [
     { id: 'journal', label: 'Journal', icon: ICON.journal },
+    { id: 'follow', label: 'À suivre', icon: ICON.pin },
     { id: 'children', label: 'Enfants', icon: ICON.kids },
     { id: 'settings', label: 'Réglages', icon: ICON.settings },
   ];
@@ -89,6 +99,7 @@
         details: str(e.details),
         cares: (Array.isArray(e.cares) ? e.cares : []).filter(Boolean).map((k) => ({ id: String(k.id || uid()), time: isTime(k.time) ? k.time : '00:00', items: arr(k.items), note: str(k.note) })),
         flags: Object.fromEntries(FLAGS.map((f) => [f.key, !!(e.flags && e.flags[f.key])])),
+        done: Object.fromEntries(FOLLOW.map((f) => [f.key, !!(e.done && e.done[f.key])])),
         by: str(e.by),
         createdAt: +e.createdAt || 0,
       }));
@@ -114,7 +125,7 @@
   }
 
   let db = load();
-  const ui = { tab: 'journal', date: todayISO(), followToday: true, childQuery: '' };
+  const ui = { tab: 'journal', date: todayISO(), followToday: true, childQuery: '', followAll: false, shareMode: 'day' };
   let form = null;      // bobo en cours de saisie
   let childForm = null; // fiche enfant ouverte
 
@@ -127,6 +138,16 @@
   function groups() { return [...new Set(db.children.map((c) => c.group).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr', { numeric: true })); }
   function entriesFor(date) { return db.entries.filter((e) => e.date === date).sort((a, b) => a.time.localeCompare(b.time) || a.createdAt - b.createdAt); }
   function entriesOf(childId) { return db.entries.filter((e) => e.childId === childId).sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time)); }
+  function followItems(key, all) {
+    return db.entries
+      .filter((e) => e.flags[key] && (all || !e.done[key]))
+      .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
+  }
+  function pendingCount() { return FOLLOW.reduce((n, f) => n + followItems(f.key, false).length, 0); }
+  function flagText(e, f) {
+    const fo = FOLLOW.find((x) => x.key === f.key);
+    return `${f.emoji} ${f.label}${fo && e.done[f.key] ? ' (fait)' : ''}`;
+  }
   function careText(k) { return [...k.items, k.note].filter(Boolean).join(', '); }
 
   /* Nom affiché dans le message : on évite les noms complets par défaut,
@@ -158,13 +179,35 @@
       if (e.details) out.push(`📝 ${e.details}`);
       if (e.cares.length) e.cares.forEach((k) => out.push(`🩹 Soin à ${fmtTime(k.time)} : ${careText(k)}`));
       else out.push('🩹 Aucun soin nécessaire');
-      const flags = FLAGS.filter((f) => e.flags[f.key]).map((f) => `${f.emoji} ${f.label}`);
-      if (flags.length) out.push(flags.join(' · '));
+      FLAGS.filter((f) => e.flags[f.key]).forEach((f) => out.push(flagText(e, f)));
       if (e.by) out.push(`👤 Soigné par ${e.by}`);
       out.push('');
     });
     if (list.length) out.push(`Total : ${plural(list.length, 'bobo')}`);
     if (s.animator) out.push(`— ${s.animator}`);
+    return out.join('\n').trim();
+  }
+
+  function buildFollowMessage(format) {
+    const out = ['📌 *À suivre — point direction*'];
+    if (db.settings.structure) out.push(db.settings.structure);
+    let total = 0;
+    FOLLOW.forEach((f) => {
+      const list = followItems(f.key, false);
+      if (!list.length) return;
+      total += list.length;
+      out.push('', `*${f.title}* (${list.length})`);
+      list.forEach((e) => {
+        const c = childById(e.childId);
+        let line = `• *${messageName(c, format)}*${c && c.group ? ` (${c.group})` : ''} — ${fmtShort(e.date)} à ${fmtTime(e.time)} : ${e.types.join(', ') || 'Bobo'}`;
+        if (e.zones.length) line += ` (${e.zones.join(', ').toLowerCase()})`;
+        out.push(line);
+        if (e.details) out.push(`   📝 ${e.details}`);
+        if (e.cares.length) out.push(`   🩹 ${e.cares.map((k) => `${fmtTime(k.time)} ${careText(k)}`).join(' ; ')}`);
+      });
+    });
+    if (!total) out.push('', '✅ Rien à transmettre ni à surveiller.');
+    if (db.settings.animator) out.push('', `— ${db.settings.animator}`);
     return out.join('\n').trim();
   }
 
@@ -182,6 +225,8 @@
 
   function render() {
     $$('.tab').forEach((b) => { if (b.dataset.tab === ui.tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+    const pending = pendingCount();
+    $('.tab[data-tab="follow"] span').innerHTML = `À suivre${pending ? ` <b class="badge">${pending}</b>` : ''}`;
     const view = $('#view');
     const bar = $('#actionbar');
     if (ui.tab === 'journal') {
@@ -189,6 +234,9 @@
       bar.innerHTML = `
         <button type="button" class="btn primary grow" data-action="entry-new">${ICON.plus}Noter un bobo</button>
         <button type="button" class="btn wa" data-action="share-open">${ICON.bubble}Partager</button>`;
+    } else if (ui.tab === 'follow') {
+      view.innerHTML = followHTML();
+      bar.innerHTML = `<button type="button" class="btn wa grow" data-action="share-follow">${ICON.bubble}Envoyer le point à la direction</button>`;
     } else if (ui.tab === 'children') {
       view.innerHTML = childrenHTML();
       bar.innerHTML = db.children.length ? `<button type="button" class="btn primary grow" data-action="child-new">${ICON.plus}Ajouter un enfant</button>` : '';
@@ -252,10 +300,42 @@
         ${e.cares.length
           ? e.cares.map((k) => `<span class="care-line"><span class="care-badge">${fmtTime(k.time)}</span><span>${esc(careText(k))}</span></span>`).join('')
           : '<span class="care-line none">Aucun soin noté</span>'}
-        ${flags.length ? `<span class="flags">${flags.map((f) => `<span class="flag">${f.emoji} ${f.label}</span>`).join('')}</span>` : ''}
+        ${flags.length ? `<span class="flags">${flags.map((f) => `<span class="flag">${esc(flagText(e, f))}</span>`).join('')}</span>` : ''}
         ${e.by ? `<span class="entry-by">Soigné par ${esc(e.by)}</span>` : ''}
       </button>
     </li>`;
+  }
+
+  function followHTML() {
+    const sections = FOLLOW.map((f) => {
+      const list = followItems(f.key, ui.followAll);
+      if (!list.length) return '';
+      return `<h2 class="group-title">${f.title} · ${list.length}</h2>
+        <div class="follow-list">${list.map((e) => {
+          const c = childById(e.childId);
+          const isDone = e.done[f.key];
+          return `<article class="card follow${isDone ? ' is-done' : ''}">
+            <div class="entry-head"><span class="entry-name">${esc(fullName(c))}</span>${c && c.group ? `<span class="tag">${esc(c.group)}</span>` : ''}</div>
+            <p class="follow-when">${esc(fmtShort(e.date))} à ${fmtTime(e.time)}${e.by ? ` · noté par ${esc(e.by)}` : ''}</p>
+            <p class="entry-what">${esc(e.types.join(' · ') || 'Bobo')}${e.zones.length ? ` <span class="muted">— ${esc(e.zones.join(', ').toLowerCase())}</span>` : ''}</p>
+            ${e.details ? `<p class="entry-details">${esc(e.details)}</p>` : ''}
+            ${e.cares.map((k) => `<p class="care-line"><span class="care-badge">${fmtTime(k.time)}</span><span>${esc(careText(k))}</span></p>`).join('')}
+            ${c && c.notes ? `<p class="alert">⚠️ ${esc(c.notes)}</p>` : ''}
+            <div class="follow-actions">
+              <button type="button" class="btn ${isDone ? 'ghost' : 'primary'}" data-action="follow-done" data-id="${esc(e.id)}" data-key="${f.key}">${isDone ? `✓ ${f.done} · annuler` : f.todo}</button>
+              <button type="button" class="link" data-action="entry-edit" data-id="${esc(e.id)}">Ouvrir</button>
+            </div>
+          </article>`;
+        }).join('')}</div>`;
+    }).join('');
+    return `
+      <header class="masthead"><h1>À suivre</h1><span class="brand-sub">Direction</span></header>
+      <p class="hint" style="margin-bottom:12px">Seulement l’important : transmissions aux enseignants et aux parents, bobos à surveiller. Les bobos bénins restent dans le journal.</p>
+      <div class="seg" role="group" aria-label="Filtre">
+        <button type="button" data-action="follow-filter" data-value="todo" aria-pressed="${!ui.followAll}">À faire</button>
+        <button type="button" data-action="follow-filter" data-value="all" aria-pressed="${ui.followAll}">Tout, y compris fait</button>
+      </div>
+      ${sections || `<div class="empty">${ICON.pin}<h2>Rien à suivre</h2><p>Quand vous cochez « à transmettre » ou « à surveiller » sur un bobo, il apparaît ici.</p></div>`}`;
   }
 
   function childrenHTML() {
@@ -441,7 +521,7 @@
     const existing = entryId ? db.entries.find((e) => e.id === entryId) : null;
     const d = existing ? clone(existing) : {
       id: null, childId: presetChildId || null, date: ui.date, time: nowHM(),
-      types: [], zones: [], details: '', cares: [], flags: {}, by: db.settings.animator,
+      types: [], zones: [], details: '', cares: [], flags: {}, done: {}, by: db.settings.animator,
     };
     form = { id: d.id, childId: childById(d.childId) ? d.childId : null };
     const cares = d.cares.length ? d.cares : [{ id: uid(), time: d.time, items: [], note: '' }];
@@ -543,6 +623,7 @@
       by: $('#e-by', sheet).value.trim(),
     };
     const existing = form.id && db.entries.find((e) => e.id === form.id);
+    data.done = Object.fromEntries(FOLLOW.map((f) => [f.key, !!(existing && existing.done[f.key] && data.flags[f.key])]));
     if (existing) Object.assign(existing, data);
     else db.entries.push(Object.assign({ id: uid(), createdAt: Date.now() }, data));
     save();
@@ -624,14 +705,16 @@
   }
 
   /* ---------- Partage ---------- */
-  function openShare() {
+  function openShare(mode) {
+    ui.shareMode = mode || 'day';
+    const follow = ui.shareMode === 'follow';
     openSheet({
-      title: 'Message du jour',
+      title: follow ? 'Point direction' : 'Message du jour',
       cancel: 'Fermer',
       body: `
         <p class="hint">Relisez et corrigez si besoin. En touchant « Envoyer sur WhatsApp », vous choisirez ensuite votre groupe dans WhatsApp.</p>
         <div class="field"><span class="label">Noms des enfants</span>${segHTML(db.settings.nameFormat, 'share-format')}</div>
-        <label class="field"><span class="label">Message — ${esc(fmtDay(ui.date))}</span>
+        <label class="field"><span class="label">${follow ? 'Message — tout ce qui reste à faire' : `Message — ${esc(fmtDay(ui.date))}`}</span>
           <textarea id="share-text" data-on-input="share-text"></textarea></label>
         <div class="field">
           <a class="btn wa block" id="share-wa" target="_blank" rel="noopener">${ICON.bubble}Envoyer sur WhatsApp</a>
@@ -645,7 +728,7 @@
   }
   function fillShare() {
     const ta = $('#share-text');
-    ta.value = buildMessage(ui.date, db.settings.nameFormat);
+    ta.value = ui.shareMode === 'follow' ? buildFollowMessage(db.settings.nameFormat) : buildMessage(ui.date, db.settings.nameFormat);
     syncShareLink();
   }
   function syncShareLink() {
@@ -820,7 +903,16 @@
     'sheet-close'() { closeSheet(); if (!sheetStack.length) { form = null; childForm = null; } },
     'sheet-done'() { const s = sheetStack[sheetStack.length - 1]; if (s && s.onDone) s.onDone(); },
 
-    'share-open'() { openShare(); },
+    'share-open'() { openShare('day'); },
+    'share-follow'() { openShare('follow'); },
+    'follow-filter'(el) { ui.followAll = el.dataset.value === 'all'; render(); },
+    'follow-done'(el) {
+      const e = db.entries.find((x) => x.id === el.dataset.id);
+      if (!e) return;
+      e.done[el.dataset.key] = !e.done[el.dataset.key];
+      save();
+      render();
+    },
     'share-format'(el) {
       db.settings.nameFormat = el.dataset.value;
       save();

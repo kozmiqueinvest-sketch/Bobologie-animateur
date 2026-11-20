@@ -3,7 +3,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.3';
+  const VERSION = '1.4';
   const STORE_KEY = 'bobologie.v1';
 
   const DEFAULT_TYPES = ['Égratignure', 'Coupure', 'Bosse / coup', 'Chute', 'Saignement de nez', 'Piqûre d’insecte', 'Écharde', 'Brûlure', 'Doigt pincé', 'Mal de tête', 'Mal de ventre', 'Morsure'];
@@ -18,6 +18,8 @@
   ];
   // Suivis qui demandent une action de la direction : eux seuls déclenchent le lien.
   const DIRECTION_KEYS = ['watch', 'txParents', 'txTeacher'];
+  // Cadenas de la direction (public). Peut aussi être saisi dans les Réglages.
+  const DIRECTION_PUB = '';
   const DIRECTION_URL = 'https://kozmiqueinvest-sketch.github.io/Bobologie-Direction/';
   const NAME_FORMATS = [
     { id: 'first', label: 'Prénom' },
@@ -109,6 +111,7 @@
         customCares: arr(s.customCares),
         installHintDismissed: !!s.installHintDismissed,
         installAsked: !!s.installAsked,
+        directionKey: str(s.directionKey),
       },
     };
   }
@@ -149,13 +152,49 @@
     return `${first} ${last[0].toUpperCase()}.`;
   }
 
-  /* Lien pour l'appli Direction : les bobos à suivre voyagent dans l'adresse elle-même
-     (après le #, donc jamais envoyés à un serveur). Format v1, clés courtes :
-     { v, a: animateur, s: structure, d: date, e: [{ i: id, t: heure, n: nom, g: groupe,
-       y: types, z: zones, x: détails, c: [[heure, soin]], f: suivis, b: soigné par }] } */
-  function directionLink(date, format) {
+  /* Lien pour l'appli Direction. Les bobos à suivre voyagent dans l'adresse elle-même
+     (après le #, donc jamais envoyés à un serveur), chiffrés avec le « cadenas » de la
+     direction : une clé publique P-256. Seul le mot de passe direction peut les relire,
+     pas même ce téléphone. Sans cadenas configuré, aucun lien n'est ajouté.
+     Contenu v1 : { v, a: animateur, s: structure, d: date, e: [{ i: id, t: heure, n: nom,
+       g: groupe, y: types, z: zones, x: détails, c: [[heure, soin]], f: suivis, b: soigné par }] }
+     Lien : #e= base64url( clé éphémère (65) + iv (12) + AES-GCM ). */
+  const b64u = (bytes) => {
+    let bin = '';
+    bytes.forEach((v) => { bin += String.fromCharCode(v); });
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  };
+  const unb64u = (str) => Uint8Array.from(atob(str.replace(/-/g, '+').replace(/_/g, '/')), (ch) => ch.charCodeAt(0));
+  function directionKey() {
+    const k = (db.settings.directionKey || DIRECTION_PUB).trim();
+    if (!/^[A-Za-z0-9_-]{86}$/.test(k)) return null;
+    return k;
+  }
+  async function encryptForDirection(text, pub) {
+    const recipientRaw = new Uint8Array(65);
+    recipientRaw[0] = 4;
+    recipientRaw.set(unb64u(pub), 1);
+    const recipient = await crypto.subtle.importKey('raw', recipientRaw, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+    const eph = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+    const ephRaw = new Uint8Array(await crypto.subtle.exportKey('raw', eph.publicKey));
+    const shared = await crypto.subtle.deriveBits({ name: 'ECDH', public: recipient }, eph.privateKey, 256);
+    const salt = new Uint8Array(130);
+    salt.set(ephRaw, 0);
+    salt.set(recipientRaw, 65);
+    const hk = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
+    const key = await crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode('bobologie-direction/v1') }, hk, { name: 'AES-GCM', length: 256 }, false, ['encrypt']);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(text)));
+    const out = new Uint8Array(77 + ct.length);
+    out.set(ephRaw, 0);
+    out.set(iv, 65);
+    out.set(ct, 77);
+    return b64u(out);
+  }
+  async function directionLink(date, format) {
+    const pub = directionKey();
     const list = entriesFor(date).filter((e) => DIRECTION_KEYS.some((k) => e.flags[k]));
-    if (!list.length) return null;
+    if (!pub || !list.length || !(window.crypto && crypto.subtle)) return null;
     const payload = {
       v: 1, a: db.settings.animator, s: db.settings.structure, d: date,
       e: list.map((e) => {
@@ -168,11 +207,12 @@
         };
       }),
     };
-    const bytes = new TextEncoder().encode(JSON.stringify(payload));
-    let bin = '';
-    bytes.forEach((b) => { bin += String.fromCharCode(b); });
-    const code = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    return { count: list.length, url: `${DIRECTION_URL}#d=${code}` };
+    try {
+      const code = await encryptForDirection(JSON.stringify(payload), pub);
+      return { count: list.length, url: `${DIRECTION_URL}#e=${code}` };
+    } catch (e) {
+      return null;
+    }
   }
 
   function buildMessage(date, format) {
@@ -198,8 +238,6 @@
     });
     if (list.length) out.push(`Total : ${plural(list.length, 'bobo')}`);
     if (s.animator) out.push(`— ${s.animator}`);
-    const link = directionLink(date, format);
-    if (link) out.push('', `📌 Direction : ${plural(link.count, 'suivi')} à traiter`, link.url);
     return out.join('\n').trim();
   }
 
@@ -422,6 +460,12 @@
         <h2>Message WhatsApp</h2>
         <div class="field"><span class="label">Comment nommer les enfants dans le message</span>${segHTML(s.nameFormat, 'set-format')}</div>
         <p class="hint">« Prénom + initiale » évite d’écrire les noms de famille complets dans le groupe.</p>
+      </section>
+      <section class="card panel">
+        <h2>Lien direction</h2>
+        <p class="hint">Quand un bobo est « à surveiller » ou « à transmettre », le message contient un lien verrouillé que seule la direction peut ouvrir. ${directionKey() ? '<b>Cadenas en place.</b>' : 'Sans cadenas, aucun lien n’est ajouté.'}</p>
+        <label class="field"><span class="label">Cadenas direction (fourni par la direction)</span>
+          <input type="text" value="${esc(s.directionKey)}" data-on-change="set-direction-key" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${DIRECTION_PUB ? 'Déjà intégré à l’appli' : 'Collez le cadenas ici'}"></label>
       </section>
       ${s.customTypes.length || s.customCares.length ? `
       <section class="card panel">
@@ -746,9 +790,17 @@
     });
     fillShare();
   }
-  function fillShare() {
+  async function fillShare() {
     const ta = $('#share-text');
-    ta.value = buildMessage(ui.date, db.settings.nameFormat);
+    const date = ui.date;
+    const format = db.settings.nameFormat;
+    const base = buildMessage(date, format);
+    ta.value = base;
+    syncShareLink();
+    const link = await directionLink(date, format);
+    // Le lien arrive un instant après : on ne l'ajoute que si rien n'a bougé entre-temps.
+    if (!link || !ta.isConnected || ta.value !== base || db.settings.nameFormat !== format) return;
+    ta.value = `${base}\n\n📌 Direction : ${plural(link.count, 'suivi')} à traiter (lien réservé à la direction)\n${link.url}`;
     syncShareLink();
   }
   function syncShareLink() {
@@ -976,6 +1028,14 @@
     'care-time'(el) { el.removeAttribute('data-synced'); },
     'share-text'() { syncShareLink(); },
     'set-animator'(el) { db.settings.animator = el.value.trim(); save(); },
+    'set-direction-key'(el) {
+      const v = el.value.trim();
+      if (v && !/^[A-Za-z0-9_-]{86}$/.test(v)) { toast('Ce cadenas n’est pas valide'); return; }
+      db.settings.directionKey = v;
+      save();
+      render();
+      toast(v ? 'Cadenas enregistré' : 'Cadenas retiré');
+    },
     'set-structure'(el) { db.settings.structure = el.value.trim(); save(); },
     'import-file'(el) { if (el.files && el.files[0]) importData(el.files[0]); el.value = ''; },
   };

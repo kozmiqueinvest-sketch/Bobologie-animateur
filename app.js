@@ -3,7 +3,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.4';
+  const VERSION = '1.5';
   const STORE_KEY = 'bobologie.v1';
 
   const DEFAULT_TYPES = ['Égratignure', 'Coupure', 'Bosse / coup', 'Chute', 'Saignement de nez', 'Piqûre d’insecte', 'Écharde', 'Brûlure', 'Doigt pincé', 'Mal de tête', 'Mal de ventre', 'Morsure'];
@@ -156,7 +156,7 @@
      (après le #, donc jamais envoyés à un serveur), chiffrés avec le « cadenas » de la
      direction : une clé publique P-256. Seul le mot de passe direction peut les relire,
      pas même ce téléphone. Sans cadenas configuré, aucun lien n'est ajouté.
-     Contenu v1 : { v, a: animateur, s: structure, d: date, e: [{ i: id, t: heure, n: nom,
+     Contenu v1 : { v, a: animateur, s: structure, d: date, e: [{ i: id, t: heure, n: nom affiché, p: prénom, l: nom, o: infos utiles,
        g: groupe, y: types, z: zones, x: détails, c: [[heure, soin]], f: suivis, b: soigné par }] }
      Lien : #e= base64url( clé éphémère (65) + iv (12) + AES-GCM ). */
   const b64u = (bytes) => {
@@ -201,6 +201,8 @@
         const c = childById(e.childId);
         return {
           i: e.id, t: e.time, n: messageName(c, format), g: c ? c.group : '',
+          // Fiche complète, pour le dossier enfant côté direction (le lien est chiffré).
+          p: c ? c.firstName : '', l: c ? c.lastName : '', o: c ? c.notes : '',
           y: e.types, z: e.zones, x: e.details,
           c: e.cares.map((k) => [k.time, careText(k)]),
           f: FLAGS.filter((f) => e.flags[f.key]).map((f) => f.key), b: e.by,

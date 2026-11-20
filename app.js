@@ -3,7 +3,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.2';
+  const VERSION = '1.3';
   const STORE_KEY = 'bobologie.v1';
 
   const DEFAULT_TYPES = ['Égratignure', 'Coupure', 'Bosse / coup', 'Chute', 'Saignement de nez', 'Piqûre d’insecte', 'Écharde', 'Brûlure', 'Doigt pincé', 'Mal de tête', 'Mal de ventre', 'Morsure'];
@@ -16,6 +16,9 @@
     { key: 'txParents', label: 'Transmission parents', emoji: '💬' },
     { key: 'txTeacher', label: 'Transmission enseignant', emoji: '🏫' },
   ];
+  // Suivis qui demandent une action de la direction : eux seuls déclenchent le lien.
+  const DIRECTION_KEYS = ['watch', 'txParents', 'txTeacher'];
+  const DIRECTION_URL = 'https://kozmiqueinvest-sketch.github.io/Bobologie-Direction/';
   const NAME_FORMATS = [
     { id: 'first', label: 'Prénom' },
     { id: 'initial', label: 'Prénom + initiale' },
@@ -146,6 +149,32 @@
     return `${first} ${last[0].toUpperCase()}.`;
   }
 
+  /* Lien pour l'appli Direction : les bobos à suivre voyagent dans l'adresse elle-même
+     (après le #, donc jamais envoyés à un serveur). Format v1, clés courtes :
+     { v, a: animateur, s: structure, d: date, e: [{ i: id, t: heure, n: nom, g: groupe,
+       y: types, z: zones, x: détails, c: [[heure, soin]], f: suivis, b: soigné par }] } */
+  function directionLink(date, format) {
+    const list = entriesFor(date).filter((e) => DIRECTION_KEYS.some((k) => e.flags[k]));
+    if (!list.length) return null;
+    const payload = {
+      v: 1, a: db.settings.animator, s: db.settings.structure, d: date,
+      e: list.map((e) => {
+        const c = childById(e.childId);
+        return {
+          i: e.id, t: e.time, n: messageName(c, format), g: c ? c.group : '',
+          y: e.types, z: e.zones, x: e.details,
+          c: e.cares.map((k) => [k.time, careText(k)]),
+          f: FLAGS.filter((f) => e.flags[f.key]).map((f) => f.key), b: e.by,
+        };
+      }),
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify(payload));
+    let bin = '';
+    bytes.forEach((b) => { bin += String.fromCharCode(b); });
+    const code = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return { count: list.length, url: `${DIRECTION_URL}#d=${code}` };
+  }
+
   function buildMessage(date, format) {
     const s = db.settings;
     const list = entriesFor(date);
@@ -169,6 +198,8 @@
     });
     if (list.length) out.push(`Total : ${plural(list.length, 'bobo')}`);
     if (s.animator) out.push(`— ${s.animator}`);
+    const link = directionLink(date, format);
+    if (link) out.push('', `📌 Direction : ${plural(link.count, 'suivi')} à traiter`, link.url);
     return out.join('\n').trim();
   }
 

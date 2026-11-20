@@ -3,7 +3,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.1';
+  const VERSION = '1.2';
   const STORE_KEY = 'bobologie.v1';
 
   const DEFAULT_TYPES = ['Égratignure', 'Coupure', 'Bosse / coup', 'Chute', 'Saignement de nez', 'Piqûre d’insecte', 'Écharde', 'Brûlure', 'Doigt pincé', 'Mal de tête', 'Mal de ventre', 'Morsure'];
@@ -105,6 +105,7 @@
         customTypes: arr(s.customTypes),
         customCares: arr(s.customCares),
         installHintDismissed: !!s.installHintDismissed,
+        installAsked: !!s.installAsked,
       },
     };
   }
@@ -201,9 +202,63 @@
     }
   }
 
+  function isIOS() { return /iphone|ipad|ipod/i.test(navigator.userAgent); }
+  function isStandalone() { return navigator.standalone === true || matchMedia('(display-mode: standalone)').matches; }
+
+  /* Un site ne peut pas s'installer tout seul : le téléphone exige un geste de la personne.
+     On pose donc la question à la première ouverture, puis on déclenche l'installation
+     (Android) ou on montre les trois gestes à faire (iPhone). */
+  function installStepsHTML() {
+    if (isIOS()) {
+      const otherBrowser = /crios|fxios|edgios|fban|fbav|instagram|line\//i.test(navigator.userAgent);
+      return `<h2 id="dlg-title">Trois gestes sur l’iPhone</h2>
+        <ol class="steps">
+          <li>Touchez le bouton <b>Partager</b> de Safari (le carré avec une flèche vers le haut). Sur les iPhone récents, il est derrière « ••• ».</li>
+          <li>Faites défiler la liste et touchez <b>« Sur l’écran d’accueil »</b>.</li>
+          <li>Touchez <b>Ajouter</b>, puis ouvrez l’appli depuis sa nouvelle icône.</li>
+        </ol>
+        ${otherBrowser ? '<p>Vous ne trouvez pas l’option ? Ouvrez d’abord cette page dans <b>Safari</b>.</p>' : ''}
+        <button type="button" class="btn primary block" data-r="close">J’ai compris</button>`;
+    }
+    return `<h2 id="dlg-title">Installer depuis le menu</h2>
+      <ol class="steps">
+        <li>Ouvrez le menu <b>⋮</b> du navigateur, en haut à droite.</li>
+        <li>Touchez <b>« Installer l’application »</b> ou <b>« Ajouter à l’écran d’accueil »</b>.</li>
+        <li>Confirmez, puis ouvrez l’appli depuis sa nouvelle icône.</li>
+      </ol>
+      <button type="button" class="btn primary block" data-r="close">J’ai compris</button>`;
+  }
+  function openInstallDialog(stepsOnly) {
+    if ($('.dialog-back')) return;
+    const back = document.createElement('div');
+    back.className = 'dialog-back';
+    back.innerHTML = `<div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title">${stepsOnly ? installStepsHTML() : `
+      <img src="icons/icon-192.png" alt="" class="dialog-icon" width="72" height="72">
+      <h2 id="dlg-title">Installer Bobologie ?</h2>
+      <p>L’appli s’ajoute à votre écran d’accueil, s’ouvre en plein écran et fonctionne sans réseau. Vos données restent sur ce téléphone.</p>
+      <div class="grid2">
+        <button type="button" class="btn ghost" data-r="later">Pas maintenant</button>
+        <button type="button" class="btn primary" data-r="yes">Installer</button>
+      </div>`}</div>`;
+    back.addEventListener('click', async (ev) => {
+      const b = ev.target.closest('[data-r]');
+      if (!b) return;
+      if (!db.settings.installAsked) { db.settings.installAsked = true; save(); }
+      if (b.dataset.r === 'yes') {
+        if (installPrompt) { back.remove(); actions.install(); return; }
+        $('.dialog', back).innerHTML = installStepsHTML();
+        $('[data-r="close"]', back).focus();
+        return;
+      }
+      back.remove();
+    });
+    document.body.appendChild(back);
+    $('[data-r]', back).focus();
+  }
+
   function installHintHTML() {
-    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
-    const standalone = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+    const ios = isIOS();
+    const standalone = isStandalone();
     if (standalone || db.settings.installHintDismissed) return '';
     if (!ios) {
       // Android (Chrome) : le navigateur nous confie l'installation.
@@ -214,7 +269,7 @@
       </div>`;
     }
     return `<div class="notice">
-      <p><b>Installez d’abord l’appli :</b> bouton Partager de Safari, puis « Sur l’écran d’accueil ». Ce que vous saisissez ici dans Safari ne sera pas repris dans l’appli installée.</p>
+      <p><b>Installez d’abord l’appli :</b> bouton Partager de Safari, puis « Sur l’écran d’accueil ». Ce que vous saisissez ici dans Safari ne sera pas repris dans l’appli installée. <button type="button" class="link" data-action="install-help">Voir comment</button></p>
       <button type="button" data-action="hint-dismiss" aria-label="Masquer ce message">✕</button>
     </div>`;
   }
@@ -343,6 +398,12 @@
         ${custom('customTypes', 'Bobos')}
         ${custom('customCares', 'Soins')}
       </section>` : ''}
+      ${isStandalone() ? '' : `
+      <section class="card panel">
+        <h2>Installation</h2>
+        <p class="hint">L’appli n’est pas encore sur l’écran d’accueil de ce téléphone.</p>
+        <button type="button" class="btn primary block" data-action="install-ask">Installer l’appli</button>
+      </section>`}
       <section class="card panel">
         <h2>Sauvegarde</h2>
         <p class="hint">Les données sont uniquement sur ce téléphone. Exportez une sauvegarde de temps en temps, par exemple avant de changer de téléphone.</p>
@@ -728,6 +789,8 @@
       try { await p.userChoice; } catch (e) { /* fermé */ }
       render();
     },
+    'install-help'() { if (installPrompt) actions.install(); else openInstallDialog(true); },
+    'install-ask'() { openInstallDialog(false); },
     'hint-dismiss'() { db.settings.installHintDismissed = true; save(); render(); },
 
     'day-prev'() { setDate(shiftDay(ui.date, -1)); render(); },
@@ -920,6 +983,7 @@
 
   renderShell();
   render();
+  if (!isStandalone() && !db.settings.installAsked) openInstallDialog(false);
 
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
     navigator.serviceWorker.register('sw.js').catch(() => {});

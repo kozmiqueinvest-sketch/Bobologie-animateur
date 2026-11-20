@@ -1,6 +1,6 @@
 /* Service worker : rend l'appli utilisable sans réseau.
    Stratégie : on sert le cache tout de suite, et on le rafraîchit en arrière-plan. */
-const CACHE = 'bobologie-v2';
+const CACHE = 'bobologie-v1';
 const ASSETS = [
   './',
   'index.html',

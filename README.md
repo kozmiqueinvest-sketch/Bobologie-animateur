@@ -22,13 +22,13 @@ L'appli doit être servie en HTTPS pour pouvoir être installée. Le plus simple
 
 1. Sur GitHub, ouvrir ce dépôt puis **Settings → Pages**.
 2. Dans **Build and deployment**, choisir **Deploy from a branch**, sélectionner la branche qui contient ces fichiers et le dossier **/ (root)**, puis **Save**.
-3. Attendre une minute : l'adresse de l'appli s'affiche en haut de la page (du type `https://<compte>.github.io/Pianapp/`).
+3. Attendre une minute : l'adresse de l'appli s'affiche en haut de la page (du type `https://<compte>.github.io/Bobologie-animateur/`).
 
 Avec un compte GitHub gratuit, Pages n'est disponible que pour un dépôt public. Le dépôt ne contient que le code de l'appli, aucune donnée.
 
 ## QR code
 
-`qr-bobologie.png` mène à l'adresse de l'appli (`https://kozmiqueinvest-sketch.github.io/Pianapp/`). À scanner avec l'appareil photo du téléphone.
+`qr-bobologie.png` mène à l'adresse de l'appli (`https://kozmiqueinvest-sketch.github.io/Bobologie-animateur/`). À scanner avec l'appareil photo du téléphone.
 
 ## Installer sur Android
 

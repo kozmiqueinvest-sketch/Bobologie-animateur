@@ -29,7 +29,7 @@ Avec un compte GitHub gratuit, Pages n'est disponible que pour un dépôt public
 
 ## QR code
 
-`qr-bobologie.png` mène à l'adresse de l'appli (`https://kozmiqueinvest-sketch.github.io/Bobologie-animateur/`). À scanner avec l'appareil photo du téléphone.
+`qr-bobologie.png` mène à l'adresse de l'appli (`https://ifac-lambesc.github.io/Bobologie-animateur/`). À scanner avec l'appareil photo du téléphone.
 
 ## Installer sur Android
 

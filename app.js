@@ -3,7 +3,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.0';
+  const VERSION = '1.0.1';
   const STORE_KEY = 'bobologie.v1';
 
   const DEFAULT_TYPES = ['Égratignure', 'Coupure', 'Bosse / coup', 'Chute', 'Saignement de nez', 'Piqûre d’insecte', 'Écharde', 'Brûlure', 'Doigt pincé', 'Mal de tête', 'Mal de ventre', 'Morsure'];
@@ -27,7 +27,7 @@
   const DIRECTION_KEYS = ['watch', 'txParents', 'txTeacher'];
   // Cadenas de la direction (public). Peut aussi être saisi dans les Réglages.
   const DIRECTION_PUB = 'TlIrkMzEx8_Cbqxc4AHlGubn3KPFsHdQS2GWLiADmVnDUX9rDZ77JxBlHzGdL3ErHFl69qtd3KdoQquIv64AcQ';
-  const DIRECTION_URL = 'https://kozmiqueinvest-sketch.github.io/Bobologie-Direction/';
+  const DIRECTION_URL = 'https://ifac-lambesc.github.io/Bobologie-Direction/';
   const NAME_FORMATS = [
     { id: 'first', label: 'Prénom' },
     { id: 'initial', label: 'Prénom + initiale' },

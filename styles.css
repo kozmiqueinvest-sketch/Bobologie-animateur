@@ -301,3 +301,15 @@ textarea { resize: vertical; min-height: 84px; line-height: 1.4; display: block;
 .dialog-icon { border-radius: 16px; margin: 0 auto 4px; display: block; }
 .steps { list-style: decimal; text-align: left; padding-left: 22px; display: grid; gap: 10px; margin: 6px 0 10px; font-size: 16px; }
 .dialog .steps + p { text-align: left; }
+
+/* ---------- Conflits ---------- */
+:root { --conflict: #6D3FB3; --conflict-soft: #EDE4F9; }
+@media (prefers-color-scheme: dark) { :root { --conflict: #C3A4F5; --conflict-soft: #2D2242; } }
+.btn.conflict { background: var(--conflict); color: var(--surface); }
+.entry.is-conflict::before { background: var(--conflict); }
+.conflict-tag { background: var(--conflict-soft); color: var(--conflict); }
+.picked-list { display: grid; gap: 8px; margin-bottom: 10px; }
+.picked-list:empty { display: none; }
+.picked-list .alert { margin-top: 0; }
+#actionbar .btn { padding: 0 14px; }
+@media (max-width: 400px) { #actionbar { gap: 8px; } #actionbar .btn { padding: 0 10px; font-size: 16px; } #actionbar .btn svg { width: 20px; height: 20px; } }

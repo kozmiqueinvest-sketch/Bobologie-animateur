@@ -3,12 +3,19 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.7';
+  const VERSION = '1.8';
   const STORE_KEY = 'bobologie.v1';
 
   const DEFAULT_TYPES = ['Égratignure', 'Coupure', 'Bosse / coup', 'Chute', 'Saignement de nez', 'Piqûre d’insecte', 'Écharde', 'Brûlure', 'Doigt pincé', 'Mal de tête', 'Mal de ventre', 'Morsure'];
   const ZONES = ['Tête', 'Visage', 'Nez', 'Bouche / dent', 'Bras', 'Coude', 'Main / doigt', 'Ventre', 'Dos', 'Genou', 'Jambe', 'Pied / cheville'];
   const DEFAULT_CARES = ['Eau + savon', 'Désinfection', 'Pansement', 'Poche de froid', 'Compresse', 'Retrait d’écharde', 'Repos au calme', 'Verre d’eau', 'Surveillance', 'Réconfort'];
+  const CONFLICT_TYPES = ['Dispute', 'Bagarre', 'Coups', 'Bousculade', 'Insultes', 'Moqueries', 'Mise à l’écart', 'Menaces', 'Vol / dégradation'];
+  const CONFLICT_CARES = ['Discussion', 'Médiation', 'Excuses', 'Retour au calme', 'Séparation des enfants', 'Rappel des règles', 'Réparation', 'Sanction'];
+  // Bobo et conflit partagent la même fiche ; seuls les libellés et les listes changent.
+  const KINDS = {
+    bobo: { one: 'bobo', types: DEFAULT_TYPES, cares: DEFAULT_CARES, customTypes: 'customTypes', customCares: 'customCares', emoji: '🤕', careEmoji: '🩹', careWord: 'Soin', by: 'Soigné par', fallback: 'Bobo' },
+    conflit: { one: 'conflit', types: CONFLICT_TYPES, cares: CONFLICT_CARES, customTypes: 'customConflictTypes', customCares: 'customConflictCares', emoji: '⚡', careEmoji: '🤝', careWord: 'Mesure', by: 'Géré par', fallback: 'Conflit' },
+  };
   const FLAGS = [
     { key: 'parents', label: 'Parents prévenus', emoji: '📞' },
     { key: 'direction', label: 'Direction prévenue', emoji: '📣' },
@@ -88,7 +95,10 @@
       .filter((e) => e && e.id && isDate(e.date))
       .map((e) => ({
         id: String(e.id),
-        childId: String(e.childId),
+        kind: e.kind === 'conflit' ? 'conflit' : 'bobo',
+        // Un conflit peut concerner plusieurs enfants ; childId reste le premier.
+        childIds: arr(e.childIds).length ? arr(e.childIds) : [String(e.childId)],
+        childId: arr(e.childIds).length ? arr(e.childIds)[0] : String(e.childId),
         date: e.date,
         time: isTime(e.time) ? e.time : '00:00',
         types: arr(e.types),
@@ -109,6 +119,8 @@
         nameFormat: NAME_FORMATS.some((f) => f.id === s.nameFormat) ? s.nameFormat : 'initial',
         customTypes: arr(s.customTypes),
         customCares: arr(s.customCares),
+        customConflictTypes: arr(s.customConflictTypes),
+        customConflictCares: arr(s.customConflictCares),
         installHintDismissed: !!s.installHintDismissed,
         installAsked: !!s.installAsked,
         directionKey: str(s.directionKey),
@@ -136,7 +148,15 @@
   function sortedChildren() { return [...db.children].sort((a, b) => fullName(a).localeCompare(fullName(b), 'fr', { sensitivity: 'base' })); }
   function groups() { return [...new Set(db.children.map((c) => c.group).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr', { numeric: true })); }
   function entriesFor(date) { return db.entries.filter((e) => e.date === date).sort((a, b) => a.time.localeCompare(b.time) || a.createdAt - b.createdAt); }
-  function entriesOf(childId) { return db.entries.filter((e) => e.childId === childId).sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time)); }
+  function entriesOf(childId) { return db.entries.filter((e) => e.childIds.includes(childId)).sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time)); }
+  function entryKids(e) { return e.childIds.map(childById).filter(Boolean); }
+  function joinNames(names) { return names.length > 1 ? `${names.slice(0, -1).join(', ')} et ${names[names.length - 1]}` : names[0] || 'Enfant inconnu'; }
+  function entryName(e) { return joinNames(entryKids(e).map(fullName)); }
+  function countText(list) {
+    const b = list.filter((e) => e.kind === 'bobo').length;
+    const c = list.length - b;
+    return [b ? plural(b, 'bobo') : '', c ? plural(c, 'conflit') : ''].filter(Boolean).join(' · ');
+  }
   function careText(k) { return [...k.items, k.note].filter(Boolean).join(', '); }
 
   /* Nom affiché dans le message : on évite les noms complets par défaut,
@@ -194,13 +214,18 @@
   }
   async function directionLink(date, format) {
     const pub = directionKey();
-    const list = entriesFor(date).filter((e) => DIRECTION_KEYS.some((k) => e.flags[k]));
+    // Partent vers la direction : les bobos avec un suivi, et tous les conflits.
+    const list = entriesFor(date).filter((e) => e.kind === 'conflit' || DIRECTION_KEYS.some((k) => e.flags[k]));
     if (!pub || !list.length || !(window.crypto && crypto.subtle)) return null;
     const payload = {
       v: 1, a: db.settings.animator, s: db.settings.structure, d: date,
       e: list.map((e) => {
-        const c = childById(e.childId);
+        const kids = entryKids(e);
+        const c = kids[0] || null;
         return {
+          // k: 'c' pour un conflit ; m: tous les enfants concernés (un conflit en a souvent plusieurs).
+          k: e.kind === 'conflit' ? 'c' : 'b',
+          m: kids.map((x) => ({ p: x.firstName, l: x.lastName, g: x.group, o: x.notes })),
           i: e.id, t: e.time, n: messageName(c, format), g: c ? c.group : '',
           // Fiche complète, pour le dossier enfant côté direction (le lien est chiffré).
           p: c ? c.firstName : '', l: c ? c.lastName : '', o: c ? c.notes : '',
@@ -214,7 +239,7 @@
       const code = await encryptForDirection(JSON.stringify(payload), pub);
       // Les 6 premiers caractères du cadenas suivent le lien : la direction peut ainsi dire
       // si un lien illisible vient d'un autre cadenas ou d'un lien abîmé.
-      return { count: list.length, url: `${DIRECTION_URL}#e=${code}.${pub.slice(0, 6)}` };
+      return { count: list.filter((e) => e.kind === 'bobo').length, conflicts: list.filter((e) => e.kind === 'conflit').length, url: `${DIRECTION_URL}#e=${code}.${pub.slice(0, 6)}` };
     } catch (e) {
       return null;
     }
@@ -226,22 +251,31 @@
     const out = [`📋 *Bobologie — ${fmtDay(date, true)}*`];
     if (s.structure) out.push(s.structure);
     out.push('');
-    if (!list.length) out.push('✅ Aucun bobo à signaler.');
-    list.forEach((e) => {
-      const c = childById(e.childId);
-      out.push(`🕒 *${fmtTime(e.time)}* — *${messageName(c, format)}*${c && c.group ? ` (${c.group})` : ''}`);
-      let what = e.types.join(', ') || 'Bobo';
-      if (e.zones.length) what += ` — ${e.zones.join(', ').toLowerCase()}`;
-      out.push(`🤕 ${what}`);
-      if (e.details) out.push(`📝 ${e.details}`);
-      if (e.cares.length) e.cares.forEach((k) => out.push(`🩹 Soin à ${fmtTime(k.time)} : ${careText(k)}`));
-      else out.push('🩹 Aucun soin nécessaire');
-      const flags = FLAGS.filter((f) => e.flags[f.key]).map((f) => `${f.emoji} ${f.label}`);
-      if (flags.length) out.push(flags.join(' · '));
-      if (e.by) out.push(`👤 Soigné par ${e.by}`);
-      out.push('');
-    });
-    if (list.length) out.push(`Total : ${plural(list.length, 'bobo')}`);
+    if (!list.length) out.push('✅ Aucun bobo ni conflit à signaler.');
+    const section = (kind, title) => {
+      const part = list.filter((e) => e.kind === kind);
+      if (!part.length) return;
+      const K = KINDS[kind];
+      if (title) out.push(title, '');
+      part.forEach((e) => {
+        const kids = entryKids(e);
+        const groups = [...new Set(kids.map((c) => c.group).filter(Boolean))];
+        out.push(`🕒 *${fmtTime(e.time)}* — ${joinNames(kids.map((c) => `*${messageName(c, format)}*`))}${groups.length ? ` (${groups.join(', ')})` : ''}`);
+        let what = e.types.join(', ') || K.fallback;
+        if (e.zones.length) what += ` — ${e.zones.join(', ').toLowerCase()}`;
+        out.push(`${K.emoji} ${what}`);
+        if (e.details) out.push(`📝 ${e.details}`);
+        if (e.cares.length) e.cares.forEach((k) => out.push(`${K.careEmoji} ${K.careWord} à ${fmtTime(k.time)} : ${careText(k)}`));
+        else if (kind === 'bobo') out.push('🩹 Aucun soin nécessaire');
+        const flags = FLAGS.filter((f) => e.flags[f.key]).map((f) => `${f.emoji} ${f.label}`);
+        if (flags.length) out.push(flags.join(' · '));
+        if (e.by) out.push(`👤 ${K.by} ${e.by}`);
+        out.push('');
+      });
+    };
+    section('bobo', '');
+    section('conflit', '⚠️ *Conflits*');
+    if (list.length) out.push(`Total : ${countText(list).replace(' · ', ', ')}`);
     if (s.animator) out.push(`— ${s.animator}`);
     return out.join('\n').trim();
   }
@@ -265,7 +299,8 @@
     if (ui.tab === 'journal') {
       view.innerHTML = journalHTML();
       bar.innerHTML = `
-        <button type="button" class="btn primary grow" data-action="entry-new">${ICON.plus}Noter un bobo</button>
+        <button type="button" class="btn primary grow" data-action="entry-new">${ICON.plus}Bobo</button>
+        <button type="button" class="btn conflict grow" data-action="conflict-new">${ICON.plus}Conflit</button>
         <button type="button" class="btn wa" data-action="share-open">${ICON.bubble}Partager</button>`;
     } else if (ui.tab === 'children') {
       view.innerHTML = childrenHTML();
@@ -353,7 +388,7 @@
     const isToday = ui.date === today;
     const list = entriesFor(ui.date);
     const kicker = isToday ? 'Aujourd’hui' : ui.date === shiftDay(today, -1) ? 'Hier' : 'Journal';
-    const kids = new Set(list.map((e) => e.childId)).size;
+    const kids = new Set(list.flatMap((e) => e.childIds)).size;
     return `
       <header class="masthead">
         <span class="brand">${ICON.bandage}Bobologie</span>
@@ -371,29 +406,31 @@
       </div>
       ${isToday ? '' : '<button type="button" class="link center" data-action="day-today">Revenir à aujourd’hui</button>'}
       ${list.length ? `
-        <p class="count">${plural(list.length, 'bobo')} · ${plural(kids, 'enfant')}</p>
+        <p class="count">${countText(list)} · ${plural(kids, 'enfant')}</p>
         <ol class="timeline">${list.map(entryHTML).join('')}</ol>` : `
         <div class="empty">
           ${ICON.bandage}
-          <h2>Aucun bobo ${isToday ? 'pour l’instant' : 'ce jour-là'}</h2>
-          <p>${isToday ? 'Tant mieux ! Dès qu’un enfant se fait mal, notez-le ici en quelques secondes.' : 'Rien n’a été noté à cette date.'}</p>
+          <h2>Rien à signaler ${isToday ? 'pour l’instant' : 'ce jour-là'}</h2>
+          <p>${isToday ? 'Tant mieux ! Bobo ou conflit, notez-le ici en quelques secondes.' : 'Rien n’a été noté à cette date.'}</p>
         </div>`}`;
   }
 
   function entryHTML(e) {
-    const c = childById(e.childId);
+    const K = KINDS[e.kind];
+    const kids = entryKids(e);
+    const groups = [...new Set(kids.map((c) => c.group).filter(Boolean))];
     const flags = FLAGS.filter((f) => e.flags[f.key]);
-    return `<li class="entry">
+    return `<li class="entry${e.kind === 'conflit' ? ' is-conflict' : ''}">
       <time class="entry-time" datetime="${e.time}">${fmtTime(e.time)}</time>
-      <button type="button" class="card entry-card" data-action="entry-edit" data-id="${esc(e.id)}" aria-label="Modifier : ${esc(fullName(c))}, ${fmtTime(e.time)}">
-        <span class="entry-head"><span class="entry-name">${esc(fullName(c))}</span>${c && c.group ? `<span class="tag">${esc(c.group)}</span>` : ''}</span>
-        <span class="entry-what">${esc(e.types.join(' · ') || 'Bobo')}${e.zones.length ? ` <span class="muted">— ${esc(e.zones.join(', ').toLowerCase())}</span>` : ''}</span>
+      <button type="button" class="card entry-card" data-action="entry-edit" data-id="${esc(e.id)}" aria-label="Modifier le ${K.one} : ${esc(entryName(e))}, ${fmtTime(e.time)}">
+        <span class="entry-head">${e.kind === 'conflit' ? '<span class="tag conflict-tag">Conflit</span>' : ''}<span class="entry-name">${esc(entryName(e))}</span>${groups.map((g) => `<span class="tag">${esc(g)}</span>`).join('')}</span>
+        <span class="entry-what">${esc(e.types.join(' · ') || K.fallback)}${e.zones.length ? ` <span class="muted">— ${esc(e.zones.join(', ').toLowerCase())}</span>` : ''}</span>
         ${e.details ? `<span class="entry-details">${esc(e.details)}</span>` : ''}
         ${e.cares.length
           ? e.cares.map((k) => `<span class="care-line"><span class="care-badge">${fmtTime(k.time)}</span><span>${esc(careText(k))}</span></span>`).join('')
-          : '<span class="care-line none">Aucun soin noté</span>'}
+          : (e.kind === 'bobo' ? '<span class="care-line none">Aucun soin noté</span>' : '')}
         ${flags.length ? `<span class="flags">${flags.map((f) => `<span class="flag">${f.emoji} ${f.label}</span>`).join('')}</span>` : ''}
-        ${e.by ? `<span class="entry-by">Soigné par ${esc(e.by)}</span>` : ''}
+        ${e.by ? `<span class="entry-by">${K.by} ${esc(e.by)}</span>` : ''}
       </button>
     </li>`;
   }
@@ -434,7 +471,7 @@
         const n = entriesOf(c.id).length;
         return `<button type="button" class="row" data-action="child-edit" data-id="${esc(c.id)}">
           ${avatar(c)}
-          <span class="row-main"><strong>${esc(fullName(c))}</strong><span>${n ? plural(n, 'bobo') + (n > 1 ? ' notés' : ' noté') : 'Aucun bobo'}${c.notes ? ' · ⚠️ infos' : ''}</span></span>
+          <span class="row-main"><strong>${esc(fullName(c))}</strong><span>${n ? countText(entriesOf(c.id)) : 'Rien de noté'}${c.notes ? ' · ⚠️ infos' : ''}</span></span>
           ${ICON.right}
         </button>`;
       }).join('')}</div>`).join('');
@@ -472,11 +509,13 @@
 ${DIRECTION_PUB ? `<p class="hint">Cadenas intégré à l’appli : <b>${DIRECTION_PUB.slice(0, 6)}…</b></p>` : `        <label class="field"><span class="label">Cadenas direction (fourni par la direction)</span>
           <input type="text" value="${esc(s.directionKey)}" data-on-change="set-direction-key" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Collez le cadenas ici"></label>`}
       </section>
-      ${s.customTypes.length || s.customCares.length ? `
+      ${s.customTypes.length || s.customCares.length || s.customConflictTypes.length || s.customConflictCares.length ? `
       <section class="card panel">
         <h2>Vos choix ajoutés</h2>
         ${custom('customTypes', 'Bobos')}
         ${custom('customCares', 'Soins')}
+        ${custom('customConflictTypes', 'Conflits')}
+        ${custom('customConflictCares', 'Mesures prises')}
       </section>` : ''}
       ${isStandalone() ? '' : `
       <section class="card panel">
@@ -577,91 +616,97 @@ ${DIRECTION_PUB ? `<p class="hint">Cadenas intégré à l’appli : <b>${DIRECTI
     return `<button type="button" class="chip add" data-action="chip-add" data-list="${listKey}">+ Autre</button>`;
   }
   function careHTML(k, synced) {
-    const opts = union(DEFAULT_CARES, db.settings.customCares, k.items);
+    const K = KINDS[form.kind];
+    const opts = union(K.cares, db.settings[K.customCares], k.items);
     return `<div class="care" data-id="${esc(k.id)}">
       <div class="care-top">
-        <label class="field"><span class="label">Heure du soin</span>
+        <label class="field"><span class="label">Heure ${form.kind === 'conflit' ? 'de la mesure' : 'du soin'}</span>
           <input type="time" class="care-time" value="${k.time}" data-on-input="care-time"${synced ? ' data-synced' : ''}></label>
         <button type="button" class="care-remove" data-action="care-remove">Retirer</button>
       </div>
-      <div class="chips" role="group" aria-label="Soins administrés">${chipsHTML(opts, k.items, 'care-chip')}${addChipHTML('customCares')}</div>
-      <input type="text" class="care-note" value="${esc(k.note)}" placeholder="Précision (facultatif)" aria-label="Précision sur le soin" autocomplete="off">
+      <div class="chips" role="group" aria-label="${form.kind === 'conflit' ? 'Mesures prises' : 'Soins administrés'}">${chipsHTML(opts, k.items, 'care-chip')}${addChipHTML(K.customCares)}</div>
+      <input type="text" class="care-note" value="${esc(k.note)}" placeholder="Précision (facultatif)" aria-label="Précision" autocomplete="off">
     </div>`;
   }
 
-  function openEntryForm(entryId, presetChildId) {
+  function openEntryForm(entryId, presetChildId, kind) {
     const existing = entryId ? db.entries.find((e) => e.id === entryId) : null;
     const d = existing ? clone(existing) : {
-      id: null, childId: presetChildId || null, date: ui.date, time: nowHM(),
+      id: null, kind: kind || 'bobo', childIds: presetChildId ? [presetChildId] : [], date: ui.date, time: nowHM(),
       types: [], zones: [], details: '', cares: [], flags: {}, by: db.settings.animator,
     };
-    form = { id: d.id, childId: childById(d.childId) ? d.childId : null };
+    const conflict = d.kind === 'conflit';
+    const K = KINDS[d.kind];
+    form = { id: d.id, kind: d.kind, childIds: d.childIds.filter((id) => childById(id)) };
     const cares = d.cares.length ? d.cares : [{ id: uid(), time: d.time, items: [], note: '' }];
     openSheet({
-      title: existing ? 'Modifier le bobo' : 'Nouveau bobo',
+      title: `${existing ? 'Modifier le' : 'Nouveau'} ${K.one}`,
       done: 'Enregistrer',
       onDone: saveEntry,
       body: `
-        <section><h3>Enfant</h3><div id="child-picker"></div></section>
+        <section><h3>${conflict ? 'Enfants concernés' : 'Enfant'}</h3><div id="child-picker"></div></section>
         <section class="grid2">
           <label class="field"><span class="label">Date</span><input type="date" id="e-date" value="${d.date}" max="${todayISO()}"></label>
-          <label class="field"><span class="label">Heure du bobo</span><input type="time" id="e-time" value="${d.time}" data-on-input="entry-time"></label>
+          <label class="field"><span class="label">Heure du ${K.one}</span><input type="time" id="e-time" value="${d.time}" data-on-input="entry-time"></label>
         </section>
-        <section><h3>Quel bobo ?</h3>
-          <div class="chips" id="e-types" role="group" aria-label="Type de bobo">${chipsHTML(union(DEFAULT_TYPES, db.settings.customTypes, d.types), d.types)}${addChipHTML('customTypes')}</div></section>
-        <section><h3>Où ?<small>facultatif</small></h3>
-          <div class="chips" id="e-zones" role="group" aria-label="Zone du corps">${chipsHTML(union(ZONES, d.zones), d.zones)}</div></section>
-        <section><label class="field"><span class="label">Comment c’est arrivé, précisions</span>
-          <textarea id="e-details" placeholder="ex. A trébuché en courant dans la cour">${esc(d.details)}</textarea></label></section>
-        <section><h3>Soins administrés</h3>
+        <section><h3>${conflict ? 'Quel conflit ?' : 'Quel bobo ?'}</h3>
+          <div class="chips" id="e-types" role="group" aria-label="Type de ${K.one}">${chipsHTML(union(K.types, db.settings[K.customTypes], d.types), d.types)}${addChipHTML(K.customTypes)}</div></section>
+        ${conflict ? '' : `<section><h3>Où ?<small>facultatif</small></h3>
+          <div class="chips" id="e-zones" role="group" aria-label="Zone du corps">${chipsHTML(union(ZONES, d.zones), d.zones)}</div></section>`}
+        <section><label class="field"><span class="label">${conflict ? 'Ce qui s’est passé' : 'Comment c’est arrivé, précisions'}</span>
+          <textarea id="e-details" placeholder="${conflict ? 'ex. Dispute pour le ballon pendant la récréation' : 'ex. A trébuché en courant dans la cour'}">${esc(d.details)}</textarea></label></section>
+        <section><h3>${conflict ? 'Mesures prises' : 'Soins administrés'}</h3>
           <div id="e-cares">${cares.map((k) => careHTML(k, !existing)).join('')}</div>
-          <button type="button" class="btn ghost block" data-action="care-add">${ICON.plus}Ajouter un soin à une autre heure</button></section>
+          <button type="button" class="btn ghost block" data-action="care-add">${ICON.plus}${conflict ? 'Ajouter une mesure à une autre heure' : 'Ajouter un soin à une autre heure'}</button></section>
         <section><h3>Suivi</h3>
-          <div class="chips" id="e-flags" role="group" aria-label="Suivi">${FLAGS.map((f) => `<button type="button" class="chip" aria-pressed="${!!d.flags[f.key]}" data-action="chip" data-value="${f.key}">${f.emoji} ${f.label}</button>`).join('')}</div></section>
-        <section><label class="field"><span class="label">Soigné par</span>
+          <div class="chips" id="e-flags" role="group" aria-label="Suivi">${FLAGS.map((f) => `<button type="button" class="chip" aria-pressed="${!!d.flags[f.key]}" data-action="chip" data-value="${f.key}">${f.emoji} ${f.label}</button>`).join('')}</div>
+          ${conflict ? '<p class="hint" style="margin-top:10px">Un conflit est toujours transmis à la direction par le lien verrouillé.</p>' : ''}</section>
+        <section><label class="field"><span class="label">${K.by}</span>
           <input type="text" id="e-by" value="${esc(d.by)}" autocapitalize="words" autocomplete="off" placeholder="Votre prénom"></label></section>
         <section class="field">
           <button type="button" class="btn primary block" data-action="sheet-done">Enregistrer</button>
-          ${existing ? '<button type="button" class="btn danger block" data-action="entry-delete">Supprimer ce bobo</button>' : ''}
+          ${existing ? `<button type="button" class="btn danger block" data-action="entry-delete">Supprimer ce ${K.one}</button>` : ''}
         </section>`,
     });
     renderChildPicker();
   }
 
+  /* Un bobo concerne un enfant ; un conflit, autant qu'il faut. */
   function renderChildPicker(focus) {
     const host = $('#child-picker');
     if (!host) return;
-    const c = childById(form.childId);
-    if (c) {
-      host.innerHTML = `<div class="card picked">
+    const multi = form.kind === 'conflit';
+    const picked = form.childIds.map(childById).filter(Boolean);
+    const cards = picked.map((c) => `<div class="card picked">
           ${avatar(c)}
           <div class="picked-main"><strong>${esc(fullName(c))}</strong>${c.group ? `<span>${esc(c.group)}</span>` : ''}</div>
-          <button type="button" class="link" data-action="pick-clear">Changer</button>
+          <button type="button" class="link" data-action="pick-clear" data-id="${esc(c.id)}">${multi ? 'Retirer' : 'Changer'}</button>
         </div>
-        ${c.notes ? `<p class="alert">⚠️ ${esc(c.notes)}</p>` : ''}`;
-      return;
-    }
-    host.innerHTML = `<input type="search" id="pick-q" placeholder="Prénom de l’enfant…" data-on-input="pick-q" autocomplete="off" autocapitalize="words" aria-label="Rechercher ou ajouter un enfant">
-      <div class="chips" id="pick-results"></div>`;
+        ${c.notes ? `<p class="alert">⚠️ ${esc(c.notes)}</p>` : ''}`).join('');
+    const search = multi || !picked.length ? `<input type="search" id="pick-q" placeholder="${picked.length ? 'Ajouter un autre enfant…' : 'Prénom de l’enfant…'}" data-on-input="pick-q" autocomplete="off" autocapitalize="words" aria-label="Rechercher ou ajouter un enfant">
+      <div class="chips" id="pick-results"></div>` : '';
+    host.innerHTML = `<div class="picked-list">${cards}</div>${search}`;
     renderPickResults('');
-    if (focus) $('#pick-q').focus();
+    if (focus && $('#pick-q')) $('#pick-q').focus();
   }
 
   function renderPickResults(query) {
     const host = $('#pick-results');
     if (!host) return;
     const q = norm(query);
-    const list = sortedChildren().filter((c) => !q || norm(fullName(c)).includes(q));
-    const exact = list.some((c) => norm(fullName(c)) === q);
+    const all = sortedChildren();
+    const exact = all.some((c) => norm(fullName(c)) === q);
+    const list = all.filter((c) => !form.childIds.includes(c.id) && (!q || norm(fullName(c)).includes(q)));
     const chips = list.slice(0, 60).map((c) => `<button type="button" class="chip" data-action="pick" data-id="${esc(c.id)}">${esc(fullName(c))}${c.group ? `<small>${esc(c.group)}</small>` : ''}</button>`).join('');
     const create = q && !exact ? `<button type="button" class="chip create" data-action="pick-create">+ Ajouter « ${esc(query.trim())} »</button>` : '';
-    host.innerHTML = chips + create || '<p class="hint">Aucun enfant enregistré : tapez un prénom pour l’ajouter.</p>';
+    host.innerHTML = chips + create || (db.children.length ? '' : '<p class="hint">Aucun enfant enregistré : tapez un prénom pour l’ajouter.</p>');
   }
 
   function saveEntry() {
     const sheet = topSheet();
     const pressed = (root) => $$('.chip[aria-pressed="true"][data-value]', root).map((b) => b.dataset.value);
-    if (!form.childId) {
+    const K = KINDS[form.kind];
+    if (!form.childIds.length) {
       toast('Choisissez d’abord un enfant');
       $('.sheet-body', sheet).scrollTo({ top: 0 });
       const q = $('#pick-q', sheet);
@@ -671,7 +716,7 @@ ${DIRECTION_PUB ? `<p class="hint">Cadenas intégré à l’appli : <b>${DIRECTI
     const types = pressed($('#e-types', sheet));
     const details = $('#e-details', sheet).value.trim();
     if (!types.length && !details) {
-      toast('Indiquez le bobo');
+      toast(`Indiquez le ${K.one}`);
       $('#e-types', sheet).scrollIntoView({ block: 'center' });
       return;
     }
@@ -688,8 +733,8 @@ ${DIRECTION_PUB ? `<p class="hint">Cadenas intégré à l’appli : <b>${DIRECTI
       .sort((a, b) => a.time.localeCompare(b.time));
     const on = pressed($('#e-flags', sheet));
     const data = {
-      childId: form.childId, date, time, types,
-      zones: pressed($('#e-zones', sheet)),
+      kind: form.kind, childIds: [...form.childIds], childId: form.childIds[0], date, time, types,
+      zones: $('#e-zones', sheet) ? pressed($('#e-zones', sheet)) : [],
       details, cares,
       flags: Object.fromEntries(FLAGS.map((f) => [f.key, on.includes(f.key)])),
       by: $('#e-by', sheet).value.trim(),
@@ -702,7 +747,7 @@ ${DIRECTION_PUB ? `<p class="hint">Cadenas intégré à l’appli : <b>${DIRECTI
     ui.tab = 'journal';
     setDate(date);
     render();
-    toast(existing ? 'Bobo modifié' : 'Bobo enregistré');
+    toast(`${K.fallback} ${existing ? 'modifié' : 'enregistré'}`);
   }
 
   /* ---------- Fiche enfant ---------- */
@@ -726,9 +771,12 @@ ${DIRECTION_PUB ? `<p class="hint">Cadenas intégré à l’appli : <b>${DIRECTI
           <label class="field"><span class="label">Infos utiles (allergies, PAI…)</span><textarea id="c-notes" placeholder="Affichées en alerte quand vous notez un bobo">${esc(c ? c.notes : '')}</textarea></label>
         </section>
         ${c ? `
-        <section><button type="button" class="btn primary block" data-action="child-entry">${ICON.plus}Noter un bobo pour ${esc(c.firstName)}</button></section>
-        <section><h3>Historique<small>${hist.length ? plural(hist.length, 'bobo') : ''}</small></h3>
-          ${hist.length ? `<ul class="history">${hist.map((e) => `<li><b>${esc(fmtShort(e.date))} · ${fmtTime(e.time)}</b><br>${esc(e.types.join(', ') || 'Bobo')}${e.zones.length ? ` — ${esc(e.zones.join(', ').toLowerCase())}` : ''}${e.cares.length ? `<br><span class="muted">Soins : ${esc(e.cares.map((k) => `${fmtTime(k.time)} ${careText(k)}`).join(' ; '))}</span>` : ''}</li>`).join('')}</ul>` : '<p class="hint">Aucun bobo enregistré pour cet enfant.</p>'}
+        <section class="field">
+          <button type="button" class="btn primary block" data-action="child-entry">${ICON.plus}Noter un bobo pour ${esc(c.firstName)}</button>
+          <button type="button" class="btn conflict block" data-action="child-conflict">${ICON.plus}Noter un conflit</button>
+        </section>
+        <section><h3>Historique<small>${countText(hist)}</small></h3>
+          ${hist.length ? `<ul class="history">${hist.map((e) => `<li><b>${esc(fmtShort(e.date))} · ${fmtTime(e.time)}</b>${e.kind === 'conflit' ? ` <span class="tag conflict-tag">Conflit</span>${e.childIds.length > 1 ? `<br><span class="muted">Avec ${esc(joinNames(entryKids(e).filter((x) => x.id !== c.id).map(fullName)))}</span>` : ''}` : ''}<br>${esc(e.types.join(', ') || KINDS[e.kind].fallback)}${e.zones.length ? ` — ${esc(e.zones.join(', ').toLowerCase())}` : ''}${e.cares.length ? `<br><span class="muted">${e.kind === 'conflit' ? 'Mesures' : 'Soins'} : ${esc(e.cares.map((k) => `${fmtTime(k.time)} ${careText(k)}`).join(' ; '))}</span>` : ''}</li>`).join('')}</ul>` : '<p class="hint">Rien d’enregistré pour cet enfant.</p>'}
         </section>
         <section><button type="button" class="btn danger block" data-action="child-delete">Supprimer cet enfant</button></section>` : ''}`,
     });
@@ -805,7 +853,8 @@ ${DIRECTION_PUB ? `<p class="hint">Cadenas intégré à l’appli : <b>${DIRECTI
     const link = await directionLink(date, format);
     // Le lien arrive un instant après : on ne l'ajoute que si rien n'a bougé entre-temps.
     if (!link || !ta.isConnected || ta.value !== base || db.settings.nameFormat !== format) return;
-    ta.value = `${base}\n\n📌 Direction : ${plural(link.count, 'suivi')} à traiter (lien réservé à la direction)\n${link.url}`;
+    const what = [link.count ? plural(link.count, 'suivi') : '', link.conflicts ? plural(link.conflicts, 'conflit') : ''].filter(Boolean).join(', ');
+    ta.value = `${base}\n\n📌 Direction : ${what} à traiter (lien réservé à la direction)\n${link.url}`;
     syncShareLink();
   }
   function syncShareLink() {
@@ -889,16 +938,19 @@ ${DIRECTION_PUB ? `<p class="hint">Cadenas intégré à l’appli : <b>${DIRECTI
       if (el.showPicker && matchMedia('(pointer: fine)').matches) { try { el.showPicker(); } catch (e) { /* déjà ouvert */ } }
     },
 
-    'entry-new'() { openEntryForm(null); },
+    'entry-new'() { openEntryForm(null, null, 'bobo'); },
+    'conflict-new'() { openEntryForm(null, null, 'conflit'); },
+    'child-conflict'() { openEntryForm(null, childForm.id, 'conflit'); },
     'entry-edit'(el) { openEntryForm(el.dataset.id); },
     async 'entry-delete'() {
-      const ok = await confirmDialog({ title: 'Supprimer ce bobo ?', text: 'Il disparaîtra du journal et du message du jour.', ok: 'Supprimer', danger: true });
+      const kind = form.kind;
+      const ok = await confirmDialog({ title: `Supprimer ce ${KINDS[kind].one} ?`, text: 'Il disparaîtra du journal et du message du jour.', ok: 'Supprimer', danger: true });
       if (!ok) return;
       db.entries = db.entries.filter((e) => e.id !== form.id);
       save();
       closeAllSheets();
       render();
-      toast('Bobo supprimé');
+      toast(`${KINDS[kind].fallback} supprimé`);
     },
     chip(el) { el.setAttribute('aria-pressed', el.getAttribute('aria-pressed') !== 'true'); },
     'chip-add'(btn) {
@@ -925,7 +977,7 @@ ${DIRECTION_PUB ? `<p class="hint">Cadenas intégré à l’appli : <b>${DIRECTI
         const same = $$('.chip[data-value]', btn.parentElement).find((b) => norm(b.dataset.value) === norm(value));
         if (same) { same.setAttribute('aria-pressed', 'true'); return; }
         if (!db.settings[key].some((v) => norm(v) === norm(value))) { db.settings[key].push(value); save(); }
-        btn.insertAdjacentHTML('beforebegin', chipsHTML([value], [value], key === 'customCares' ? 'care-chip' : ''));
+        btn.insertAdjacentHTML('beforebegin', chipsHTML([value], [value], /Cares$/.test(key) ? 'care-chip' : ''));
       };
       input.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter') { ev.preventDefault(); finish(true); }
@@ -939,15 +991,18 @@ ${DIRECTION_PUB ? `<p class="hint">Cadenas intégré à l’appli : <b>${DIRECTI
     },
     'care-remove'(el) { el.closest('.care').remove(); },
 
-    pick(el) { form.childId = el.dataset.id; renderChildPicker(); },
-    'pick-clear'() { form.childId = null; renderChildPicker(true); },
+    pick(el) {
+      if (form.kind === 'conflit') form.childIds.push(el.dataset.id); else form.childIds = [el.dataset.id];
+      renderChildPicker();
+    },
+    'pick-clear'(el) { form.childIds = form.childIds.filter((id) => id !== el.dataset.id); renderChildPicker(form.kind !== 'conflit'); },
     'pick-create'() {
       const n = parseName($('#pick-q').value);
       if (!n) return;
       const c = { id: uid(), createdAt: Date.now(), firstName: n.firstName, lastName: n.lastName, group: '', notes: '' };
       db.children.push(c);
       save();
-      form.childId = c.id;
+      if (form.kind === 'conflit') form.childIds.push(c.id); else form.childIds = [c.id];
       renderChildPicker();
       toast(`${c.firstName} est ajouté·e à vos enfants`);
     },
@@ -961,11 +1016,13 @@ ${DIRECTION_PUB ? `<p class="hint">Cadenas intégré à l’appli : <b>${DIRECTI
       const n = entriesOf(c.id).length;
       const ok = await confirmDialog({
         title: `Supprimer ${c.firstName} ?`,
-        text: n ? `Sa fiche et ses ${plural(n, 'bobo')} enregistré${n > 1 ? 's' : ''} seront effacés définitivement.` : 'Sa fiche sera effacée définitivement.',
+        text: n ? `Sa fiche et ce qui a été noté pour ${c.firstName} (${countText(entriesOf(c.id))}) seront effacés définitivement.` : 'Sa fiche sera effacée définitivement.',
         ok: 'Supprimer', danger: true,
       });
       if (!ok) return;
-      db.entries = db.entries.filter((e) => e.childId !== c.id);
+      // Un conflit avec d'autres enfants est conservé, sans l'enfant supprimé.
+      db.entries.forEach((e) => { e.childIds = e.childIds.filter((id) => id !== c.id); e.childId = e.childIds[0]; });
+      db.entries = db.entries.filter((e) => e.childIds.length);
       db.children = db.children.filter((x) => x.id !== c.id);
       save();
       closeAllSheets();

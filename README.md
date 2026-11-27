@@ -8,6 +8,7 @@ C'est une appli web qui s'installe sur l'écran d'accueil de l'iPhone (pas besoi
 
 - **Journal du jour** : les bobos classés par heure, avec les soins et leur heure. Flèches pour revoir les jours précédents.
 - **Noter un bobo** en quelques touches : enfant, heure, type de bobo, zone du corps, circonstances, soins (plusieurs soins à des heures différentes possibles), parents ou direction prévenus, « à surveiller ».
+- **Conflits** : même fiche que pour un bobo, avec plusieurs enfants concernés, le type de conflit et les mesures prises. Ils apparaissent dans le journal et dans le message du jour, et sont toujours transmis à la direction par le lien verrouillé.
 - **Enfants** : fiche avec prénom, nom, groupe et infos utiles (allergies, PAI) affichées en alerte au moment de noter un bobo. On peut coller une liste d'appel entière d'un coup.
 - **Partager** : le message du jour est rédigé automatiquement, relisible et modifiable, puis envoyé vers WhatsApp où l'on choisit son groupe. On peut aussi le copier ou passer par une autre appli.
 - **Sauvegarde** : export et import d'un fichier depuis les réglages.

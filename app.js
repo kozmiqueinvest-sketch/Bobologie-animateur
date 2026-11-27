@@ -3,7 +3,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.8';
+  const VERSION = '1.9';
   const STORE_KEY = 'bobologie.v1';
 
   const DEFAULT_TYPES = ['Égratignure', 'Coupure', 'Bosse / coup', 'Chute', 'Saignement de nez', 'Piqûre d’insecte', 'Écharde', 'Brûlure', 'Doigt pincé', 'Mal de tête', 'Mal de ventre', 'Morsure'];
@@ -1105,6 +1105,7 @@ ${DIRECTION_PUB ? `<p class="hint">Cadenas intégré à l’appli : <b>${DIRECTI
   document.addEventListener('click', (ev) => {
     const el = ev.target.closest('[data-action]');
     if (!el || el.disabled) return;
+    if (el.dataset.action === 'update-now') { el.disabled = true; el.textContent = 'Mise à jour…'; applyUpdate(); return; }
     const fn = actions[el.dataset.action];
     if (fn) fn(el, ev);
   });
@@ -1134,8 +1135,41 @@ ${DIRECTION_PUB ? `<p class="hint">Cadenas intégré à l’appli : <b>${DIRECTI
   });
   window.addEventListener('appinstalled', () => { installPrompt = null; render(); });
 
+
+  /* Mise à jour : une appli ouverte garde en mémoire la version chargée, parfois des jours
+     sur iPhone. À l'ouverture et à chaque retour dans l'appli, on regarde si le serveur en a
+     une plus récente, et on propose de la charger. */
+  let updateSeen = false;
+  async function checkUpdate() {
+    if (updateSeen || !navigator.onLine) return;
+    try {
+      const res = await fetch(`app.js?v=${Date.now()}`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const m = (await res.text()).match(/const VERSION = '([^']+)'/);
+      if (!m || m[1] === VERSION) return;
+      updateSeen = true;
+      const bar = document.createElement('div');
+      bar.className = 'update-bar';
+      bar.setAttribute('role', 'status');
+      bar.innerHTML = `<span>Nouvelle version ${esc(m[1])} disponible</span><button type="button" class="btn" data-action="update-now">Mettre à jour</button>`;
+      document.body.appendChild(bar);
+    } catch (e) { /* hors ligne : on réessaiera */ }
+  }
+  async function applyUpdate() {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg) await reg.update();
+      // On vide le cache de l'appli (pas les données) pour repartir sur les nouveaux fichiers.
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    } catch (e) { /* le rechargement suffit le plus souvent */ }
+    location.reload();
+  }
+
   renderShell();
   render();
+  checkUpdate();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(); });
   if (!isStandalone() && !db.settings.installAsked) openInstallDialog(false);
 
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
